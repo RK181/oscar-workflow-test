@@ -32,7 +32,7 @@ jobs:
     - name: Get release latest version 
       id: latest
       run: |
-        latest=$(curl -s https://api.github.com/repos/grycap/oscar/releases/latest | jq -r .tag_name)
+        latest="test-work"
         echo "Last release tag: $latest"
         echo "tag_name=$latest" >> $GITHUB_OUTPUT
     - name: Install swag
