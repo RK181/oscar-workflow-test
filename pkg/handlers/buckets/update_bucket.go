@@ -38,7 +38,7 @@ var updateLogger = log.New(os.Stdout, "[UPDATE-HANDLER] ", log.Flags())
 // @Description Change bucket visibility or allowed users.
 // @Tags buckets
 // @Accept json
-// @Param bucket body utils.MinIOBucket true "Bucket definition"
+// @Param bucket body types.MinIOBucket true "Bucket definition"
 // @Success 204 {string} string "No Content"
 // @Failure 401 {string} string "Unauthorized"
 // @Failure 403 {string} string "Forbidden"
@@ -61,7 +61,8 @@ func MakeUpdateHandler(cfg *types.Config) gin.HandlerFunc {
 		}
 
 		authHeader := c.GetHeader("Authorization")
-		if len(strings.Split(authHeader, "Bearer")) == 1 {
+		isAdmin := len(strings.Split(authHeader, "Bearer")) == 1
+		if isAdmin {
 			uid = cfg.Name
 		} else {
 			uid, err = auth.GetUIDFromContext(c)
@@ -93,12 +94,16 @@ func MakeUpdateHandler(cfg *types.Config) gin.HandlerFunc {
 			return
 		}
 
-		bucket.Owner = uid
+		if !isAdmin && metadata["owner"] != uid {
+			c.String(http.StatusForbidden, fmt.Sprintf("User '%s' is not authorised", uid))
+			return
+		}
+
+		bucket.Owner = metadata["owner"]
+		if bucket.Owner == "" { // Administrators may update legacy untagged buckets.
+			bucket.Owner = uid
+		}
 		if utils.IsRustFSConfig(cfg) {
-			if uid != cfg.Username && metadata["owner"] != uid {
-				c.String(http.StatusForbidden, fmt.Sprintf("User '%s' is not authorised", uid))
-				return
-			}
 			ownerName := metadata["owner_name"]
 			if ownerName == "" {
 				ownerName = uid
@@ -117,13 +122,13 @@ func MakeUpdateHandler(cfg *types.Config) gin.HandlerFunc {
 
 		var oldVis string
 		if oldVis = objectStorageIAM.GetClient(c.Request.Context()).GetCurrentResourceVisibility(bucket); oldVis != "" {
-			if oldVis == types.PUBLIC || objectStorageIAM.GetClient(c.Request.Context()).ResourceInPolicy(uid, bucket.BucketName) {
+			if oldVis == types.PUBLIC || objectStorageIAM.GetClient(c.Request.Context()).ResourceInPolicy(bucket.Owner, bucket.BucketName) {
 				if oldVis != bucket.Visibility {
 					// Remove old policies
 					err := objectStorageIAM.GetClient(c.Request.Context()).UnsetPolicies(types.MinIOBucket{
 						BucketName: bucket.BucketName,
 						Visibility: oldVis,
-						Owner:      uid,
+						Owner:      bucket.Owner,
 					})
 					if err != nil {
 						c.String(http.StatusInternalServerError, fmt.Sprintln("error updating bucket:", err))

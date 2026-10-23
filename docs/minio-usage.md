@@ -4,11 +4,8 @@ Each OSCAR cluster includes a deployed MinIO instance, which is used to trigger 
 
 Additionally, OSCAR allows direct operations on the MinIO instance—such as creating, updating, and deleting buckets—that are independent of any specific service but still governed by the same visibility rules as services.
 
-## RustFS permissions
-
-RustFS notification configuration and IAM operations use its native `/rustfs/admin/v3` routes.
-
-With `OBJECT_STORAGE_TYPE=rustfs`, OSCAR uses the same policy creation, assignment, update and removal flow as MinIO through the RustFS-native IAM API. Group membership requests use the RustFS JSON format and group status.
+OSCAR can also use [RustFS](rustfs-usage.md) or [Silo](silo-usage.md) as an
+alternative object storage provider.
 
 ## Using graphical interfaces
 
@@ -34,10 +31,12 @@ Further information about the MinIO Console is available in the [MinIO Console d
 
 MinIO buckets can also be managed through [oscar-cli command-line](https://github.com/grycap/oscar-cli) or the official [MinIO client](https://min.io/docs/minio/linux/reference/minio-mc.html). 
 
-- **oscar-cli**: The OSCAR client provides a dedicated set of commands for accessing files within buckets. It is important to note that this interface does not support DELETE or UPDATE operations. Below is a brief overview of the available commands and their functionalities.
-  - [get-file](oscar-cli.md#get-file): Get file from a service's storage provider.
+- **oscar-cli**: The OSCAR client provides commands for accessing and managing files. Available operations include:
+  - [get-file](oscar-cli.md#get-file): Get a file from a service's storage provider.
   - [list-files](oscar-cli.md#list-files): List files from a service's storage provider path.
-  - [put-file](oscar-cli.md#put-file): Upload a file on a service storage provider.
+  - [put-file](oscar-cli.md#put-file): Upload a file to a service storage provider.
+  - [service delete-file](oscar-cli.md#service-delete-file): Delete a file from a service storage provider (MinIO, S3, or Onedata).
+  - [bucket delete-file](oscar-cli.md#delete-file): Delete a file from a MinIO bucket.
   
   An example of a put-file operation:
 

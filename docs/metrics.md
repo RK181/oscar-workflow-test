@@ -60,6 +60,50 @@ exact user namespace for OIDC requests. The legacy `{{services_namespace}}`
 placeholder remains supported for existing installations, but custom templates
 using it should be migrated.
 
+#### Storage and data persistence
+
+The `prometheus-community/prometheus` chart sets
+`server.persistentVolume.enabled: true` by default, so the Prometheus server
+mounts its `/data` directory on a PersistentVolumeClaim named
+`prometheus-server` that the chart itself creates. The access mode is
+`ReadWriteOnce` and the size is 2Gi.
+
+This means the data survives a Prometheus failure. If the pod is restarted,
+rescheduled or replaced by an upgrade, the TSDB blocks and the write-ahead log
+remain in the volume and are recovered on startup, instead of the metrics
+endpoints returning an empty history for the affected range. Note that the
+default retention is 15 days, so the stored history does not grow
+indefinitely.
+
+The size and the storage class can be changed at install time. Setting
+`storageClass` is needed when the default provisioner of the cluster is not the
+one to use, for example to place Prometheus on the NFS storage class of a local
+deployment:
+
+```sh
+helm upgrade --install prometheus prometheus-community/prometheus \
+  --namespace monitoring \
+  --set server.persistentVolume.size=20Gi \
+  --set server.persistentVolume.storageClass=nfs
+```
+
+An already provisioned claim can be reused instead with
+`server.persistentVolume.existingClaim`, in which case the PVC must exist
+before the volume is bound.
+
+The claim protects the data against the loss of the Prometheus process, but not
+against the deletion of the claim itself: removing the `prometheus-server`
+PersistentVolumeClaim deletes the stored blocks with it. A storage class that
+cannot provision on demand is also a common cause for the pod to stay
+`Pending`.
+
+To check how much space the installation is using and which capacity backs the
+claim, the repository provides a helper script:
+
+```sh
+bash deploy/metrics/check-monitoring-storage.sh
+```
+
 ### Loki request logs (durable breakdowns)
 
 Request-based metrics (breakdowns, request counts) can be sourced from Loki for
@@ -72,7 +116,27 @@ to Kubernetes pod logs.
 - `LOKI_EXPOSED_NAMESPACE` (gateway namespace; default `ingress-nginx`)
 - `LOKI_EXPOSED_APP` (gateway app label; default `ingress-nginx`)
 
-With Traefik HTTPRoutes and DNS subdomains, OSCAR identifies the service from
-`RequestAddr` and obtains its namespace from Traefik's `ServiceName` access-log
-field. The Alloy pipeline must retain the JSON access log body; the provided
-Traefik configuration already does so.
+When exposed services are routed through DNS subdomains (see
+[Exposed services](exposed-services.md)), expose the gateway access logs of the
+routing gateway. For Traefik HTTPRoutes, set `LOKI_EXPOSED_NAMESPACE` and
+`LOKI_EXPOSED_APP` to the gateway namespace and app label used by the Traefik
+installation (e.g., `traefik`) instead of the `ingress-nginx` defaults. The
+provided Alloy configuration keeps the full JSON body of the Traefik access
+logs so that OSCAR can attribute requests.
+
+#### Configuration validation
+
+Check the effective configuration before relying on exposed-service metrics:
+
+- If `EXPOSED_SERVICES_USE_SUBDOMAIN_ROUTE=true` and
+  `EXPOSED_SERVICES_ROUTE_KIND=httproute`, `INGRESS_HOST` must be set; otherwise
+  requests cannot be attributed from the DNS host.
+- The gateway access logs must contain the JSON fields used for attribution:
+  with DNS subdomains, OSCAR identifies the service from the request host
+  (`RequestHost`, falling back to `RequestAddr`) and obtains its namespace from
+  Traefik's `ServiceName` access-log field. Without DNS subdomains, the service
+  is extracted from `RequestPath` (`/system/services/{service_name}/exposed/...`).
+- The Alloy pipeline must retain the JSON access log body; if the access log is
+  reformatted or relabeled before reaching Loki, the fields above are lost and
+  requests will not be attributed. The provided Traefik configuration already
+  does so.

@@ -19,6 +19,7 @@ package types
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/barkimedes/go-deepcopy"
@@ -38,7 +39,6 @@ var (
 		Name:      "testname",
 		ClusterID: "testcluster",
 		Image:     "testimage",
-		Alpine:    false,
 		Memory:    "1Gi",
 		CPU:       "1.0",
 		Federation: &Federation{
@@ -185,7 +185,6 @@ func TestGetSupervisorPath(t *testing.T) {
 	svc := copy.(Service)
 
 	expectedDefault := fmt.Sprintf("%s/%s", VolumePath, SupervisorName)
-	expectedAlpine := fmt.Sprintf("%s/%s/%s", VolumePath, AlpineDirectory, SupervisorName)
 
 	path := svc.GetSupervisorPath()
 
@@ -193,14 +192,6 @@ func TestGetSupervisorPath(t *testing.T) {
 		t.Errorf("invalid supervisor path. Expected: %s, got: %s", expectedDefault, path)
 	}
 
-	// Set Alpine to true and test it
-	svc.Alpine = true
-
-	path = svc.GetSupervisorPath()
-
-	if path != expectedAlpine {
-		t.Errorf("invalid supervisor path. Expected: %s, got: %s", expectedAlpine, path)
-	}
 }
 
 func TestConvertEnvVars(t *testing.T) {
@@ -260,7 +251,6 @@ federation:
       Authorization: Bearer testtoken
 log_level: ""
 image: testimage
-alpine: false
 token: ""
 file_stage_in: false
 input: []
@@ -410,6 +400,66 @@ func TestToPodSpec(t *testing.T) {
 
 			}
 		})
+	}
+}
+
+func TestAddWatchdogEnvVarsRejectsDuplicateReservedVar(t *testing.T) {
+	podSpec := &v1.PodSpec{
+		Containers: []v1.Container{{
+			Name: ContainerName,
+			Env: []v1.EnvVar{{
+				Name:  WatchdogProcess,
+				Value: "custom-fprocess",
+			}},
+		}},
+	}
+
+	err := addWatchdogEnvVars(podSpec, &Config{}, &Service{Name: "demo"})
+	if err == nil {
+		t.Fatal("expected duplicate watchdog env var to be rejected")
+	}
+	if !strings.Contains(err.Error(), WatchdogProcess) {
+		t.Fatalf("expected error to mention %q, got %q", WatchdogProcess, err.Error())
+	}
+}
+
+func TestAddServiceMetadataEnvVarsRejectsDuplicateReservedVar(t *testing.T) {
+	podSpec := &v1.PodSpec{
+		Containers: []v1.Container{{
+			Name: ContainerName,
+			Env: []v1.EnvVar{{
+				Name:  OscarServiceNameEnvVar,
+				Value: "conflict",
+			}},
+		}},
+	}
+
+	err := addServiceMetadataEnvVars(podSpec, &Service{Name: "demo", Token: "token"}, &Config{})
+	if err == nil {
+		t.Fatal("expected duplicate service metadata env var to be rejected")
+	}
+	if !strings.Contains(err.Error(), OscarServiceNameEnvVar) {
+		t.Fatalf("expected error to mention %q, got %q", OscarServiceNameEnvVar, err.Error())
+	}
+}
+
+func TestToPodSpecRejectsDuplicateReservedEnvVars(t *testing.T) {
+	copy, err := deepcopy.Anything(testService)
+	if err != nil {
+		t.Fatalf("unable to deep copy test service: %v", err)
+	}
+	svc := copy.(Service)
+	svc.Token = "test-token"
+	svc.Environment.Vars = map[string]string{
+		OscarServiceNameEnvVar: "duplicate-name",
+	}
+
+	_, err = svc.ToPodSpec(&testConfig)
+	if err == nil {
+		t.Fatal("expected ToPodSpec to reject duplicated reserved env vars")
+	}
+	if !strings.Contains(err.Error(), OscarServiceNameEnvVar) {
+		t.Fatalf("expected error to mention %q, got %q", OscarServiceNameEnvVar, err.Error())
 	}
 }
 
